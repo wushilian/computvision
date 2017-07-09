@@ -1,0 +1,237 @@
+import tensorflow as tf
+import numpy as np
+
+batchsize=2
+weight_of_p=tf.constant([5,1.5,1.5,5],dtype=tf.float32)#感知损失权重
+m=tf.constant(0.5)#m参数
+#output_data=tf.Variable(tf.truncated_normal( [2,28,28,3]))
+def lrelu(x, leak=0.2, name="lrelu"):#复制的函数
+    with tf.variable_scope(name):
+        f1 = 0.5 * (1 + leak)
+        f2 = 0.5 * (1 - leak)
+        return f1 * x + f2 * abs(x)
+
+def batchnorm(inputs):
+    is_training=True
+    is_conv_out=True
+    decay = 0.999
+    scale = tf.Variable(tf.ones([inputs.get_shape()[-1]]))
+    beta = tf.Variable(tf.zeros([inputs.get_shape()[-1]]))
+    pop_mean = tf.Variable(tf.zeros([inputs.get_shape()[-1]]), trainable=False)
+    pop_var = tf.Variable(tf.ones([inputs.get_shape()[-1]]), trainable=False)
+
+    if is_training:
+        if is_conv_out:
+            batch_mean, batch_var = tf.nn.moments(inputs,[0,1,2])
+        else:
+            batch_mean, batch_var = tf.nn.moments(inputs,[0])   
+
+        train_mean = tf.assign(pop_mean,
+                               pop_mean * decay + batch_mean * (1 - decay))
+        train_var = tf.assign(pop_var,
+                              pop_var * decay + batch_var * (1 - decay))
+        with tf.control_dependencies([train_mean, train_var]):
+            return tf.nn.batch_normalization(inputs,
+                batch_mean, batch_var, beta, scale, 0.001)
+    else:
+        return tf.nn.batch_normalization(inputs,
+            pop_mean, pop_var, beta, scale, 0.001)
+#初始化卷积核
+def weight_variable(shape):
+    initial=tf.truncated_normal(shape,stddev=0.1)
+    return tf.Variable(initial)
+#初始化偏置
+def bias_variable(shapes):
+    initial=tf.constant(0.1,shape=shapes)
+    return tf.Variable(initial)
+#卷积
+def conv2d(x,kernel_shape,strides):
+    w=weight_variable(kernel_shape)
+    b=bias_variable([kernel_shape[-1]])
+    return tf.nn.conv2d(x,w,strides=[1,strides,strides,1],padding='SAME')+b
+#反卷积
+def deconv2d(x,kernel_shape,strides,output):
+    output_shape=output.get_shape()
+    w=weight_variable(kernel_shape)
+    b=bias_variable([output_shape[-1]])
+    dh=tf.nn.conv2d_transpose(x,w,output_shape,strides=[1,strides,strides,1])
+    return (dh+b)
+#生成网络
+def net_T(inputs):
+    #第一层
+    h_conv1=conv2d(inputs,[3,3,3,64],strides=2)
+    h1=lrelu(h_conv1)
+
+    #第二层
+    h_conv2=conv2d(h1,[3,3,64,128],strides=2)
+    h2=batchnorm(h_conv2)
+
+    #第三层
+    input_3=lrelu(h2)
+    h_conv3=conv2d(input_3,[3,3,128,256],strides=2)
+    h3=batchnorm(h_conv3)
+
+    #第四层
+    input_4=lrelu(h3)
+    h_conv4=conv2d(input_4,[3,3,256,512],strides=2)
+    h4=batchnorm(h_conv4)
+
+    #第五层
+    input_5=lrelu(h4)
+    h_conv5=conv2d(input_5,[3,3,512,512],strides=2)
+    h5=batchnorm(h_conv5)
+
+    #第六层
+    input_6=lrelu(h5)
+    h_conv6=conv2d(input_6,[3,3,512,512],strides=2)
+    h6=batchnorm(h_conv6)
+    input_7=lrelu(h6)
+
+    #第七层
+    h_deconv7=deconv2d(input_7,[4,4,512,512],2,input_6)
+    h7=batchnorm(h_deconv7)
+    h7_out=tf.nn.relu(tf.concat([h7,h5],axis=3))
+    
+
+    #第八层
+    h_deconv8=deconv2d(h7_out,[4,4,512,1024],2,input_5)
+    h8=batchnorm(h_deconv8)
+    h8_out=tf.nn.relu(tf.concat([h8,h4],axis=3))
+
+    #第九层
+    h_deconv9=deconv2d(h8_out,[4,4,256,1024],2,input_4)
+    h9=batchnorm(h_deconv9)
+    h9_out=tf.nn.relu(tf.concat([h9,h3],axis=3))
+
+    #第十层
+    h_deconv10=deconv2d(h9_out,[4,4,128,512],2,input_3)
+    h10=batchnorm(h_deconv10)
+    h10_out=tf.nn.relu(tf.concat([h10,h2],axis=3))
+
+    #第十一层
+    h_deconv11=deconv2d(h10_out,[4,4,64,256],2,h1)
+    h11=tf.nn.relu(batchnorm(h_deconv11))
+
+    #第十二层
+    h_deconv12=deconv2d(h11,[4,4,3,64],2,inputs)
+    h12=tf.tanh(h_deconv12)
+
+    return h12
+
+#为判别模型准备的函数，激活函数都是LRELU,isnorm为bool型，表示是否batchnorm
+def conv2d_dis(inputs,kernel_shape,strides,isnorm):
+    H_CONV=conv2d(inputs,kernel_shape,strides=strides)
+    if isnorm:
+        return lrelu(batchnorm(H_CONV))
+    else:
+        return lrelu(H_CONV)
+    
+    
+ #判别网络   
+def net_D(x_data,x_generated):
+    #第一层
+    y1_data=conv2d_dis(x_data,[3,3,3,64],strides=1,isnorm=False)
+    y1_generated=conv2d_dis(x_generated,[3,3,3,64],strides=1,isnorm=False)
+    P1=tf.reduce_sum( tf.abs(y1_data-y1_generated))
+
+    #第二层
+    y2_data=conv2d_dis(y1_data,[3,3,64,128],strides=2,isnorm=True)
+    y2_generated=conv2d_dis(y1_generated,[3,3,64,128],strides=2,isnorm=True)
+
+    #第三层
+    y3_data=conv2d_dis(y2_data,[3,3,128,128],strides=1,isnorm=True)
+    y3_generated=conv2d_dis(y2_generated,[3,3,128,128],strides=1,isnorm=True)
+
+    #第四层
+    y4_data=conv2d_dis(y3_data,[3,3,128,256],strides=2,isnorm=True)
+    y4_generated=conv2d_dis(y3_generated,[3,3,128,256],strides=2,isnorm=True)
+    P2=tf.reduce_sum(tf.abs(y4_data-y4_generated))
+
+    #第五层
+    y5_data=conv2d_dis(y4_data,[3,3,256,256],strides=1,isnorm=True)
+    y5_generated=conv2d_dis(y4_generated,[3,3,256,256],strides=1,isnorm=True)
+
+    #第六层
+    y6_data=conv2d_dis(y5_data,[3,3,256,512],strides=2,isnorm=True)
+    y6_generated=conv2d_dis(y5_generated,[3,3,256,512],strides=2,isnorm=True)
+    P3=tf.reduce_sum( tf.abs(y6_data-y6_generated))
+
+    #第七层
+    y7_data=conv2d_dis(y6_data,[3,3,512,512],strides=1,isnorm=True)
+    y7_generated=conv2d_dis(y6_generated,[3,3,512,512],strides=1,isnorm=True)
+
+    #第八层
+    y8_data=conv2d_dis(y7_data,[3,3,512,512],strides=2,isnorm=True)
+    y8_generated=conv2d_dis(y7_generated,[3,3,512,512],strides=2,isnorm=True)
+    P4=tf.reduce_sum( tf.abs(y8_data-y8_generated))
+
+    #第九层
+    y9_data=conv2d_dis(y8_data,[3,3,512,8],strides=2,isnorm=True)
+    y9_generated=conv2d_dis(y8_generated,[3,3,512,8],strides=2,isnorm=True)
+
+    #第十层,全连接层
+    y10_data_input=tf.reshape(y9_data,[batchsize,-1])#转换为二维，方便点积
+    y10_generated_input=tf.reshape(y9_generated,[batchsize,-1])
+    '''需要根据输入手动修改w10'''
+    w10=weight_variable([8,batchsize])#需要根据输入进行修改
+    b10=bias_variable([batchsize])
+    output_data=tf.nn.sigmoid( tf.matmul(y10_data_input,w10)+b10)
+    #output_data=tf.reshape(output_data,shape=[batchsize])
+    output_generated=tf.nn.sigmoid(tf.matmul(y10_generated_input,w10)+b10)
+    #output_generated=tf.reshape(output_generated,shape=[batchsize])
+    #返回y_truth,y_generated,感知损失
+    return output_data,output_generated,[P1,P2,P3,P4]
+
+
+
+def train(inputs,outputs,input_shape,epoch):
+    #创建模型,每次训练batchsize对图片
+    shapes=input_shape.copy()
+    shapes[0]=batchsize
+    #x_data为送入生成器的图片，y_data为送入判别器的label图片
+    x_data=tf.placeholder(dtype=tf.float32,shape=shapes)
+    #生成网络
+    x_generated=net_T(x_data)
+    y_data=tf.placeholder(dtype=tf.float32,shape=shapes)
+    #判别网络
+    output_data,output_generated,P=net_D(y_data,x_generated)
+    #求解感知损失加权之和
+    zz=tf.multiply(weight_of_p,P)
+    loss_T=tf.reduce_sum( tf.log(tf.maximum(1-output_generated,1e-10))+tf.reduce_sum(zz))
+    #防止出现log(0)
+    temp=tf.maximum((m-zz),0.0)
+    loss_D=tf.reduce_sum( -tf.log(tf.maximum(output_data,1e-10))-tf.log(tf.maximum(1-output_generated,1e-10))+tf.reduce_sum(temp))
+
+    #梯度下降
+    optimizer = tf.train.AdamOptimizer(0.0002)
+    T_trainer=optimizer.minimize(loss_T)
+    D_trainer=optimizer.minimize(loss_D)
+    steps=int(input_shape[0]/batchsize)
+    sess=tf.Session()
+    sess.run(tf.global_variables_initializer())#初始化所有变量
+    saver=tf.train.Saver()#用于保存模型
+    for j in range(epoch):
+        print('epoch',j)
+        
+        for i in range(steps):
+            x_value=inputs[i*batchsize:(i+1)*batchsize,:,:,:]
+            y_value=outputs[i*batchsize:(i+1)*batchsize,:,:,:]
+            sess.run(T_trainer,feed_dict={x_data:x_value,y_data:y_value})
+            sess.run(D_trainer,feed_dict={x_data:x_value,y_data:y_value})
+            print('T_loss:',sess.run(loss_T,feed_dict={x_data:x_value,y_data:y_value}))
+            print('D_loss:',sess.run(loss_D,feed_dict={x_data:x_value,y_data:y_value}))
+    saver.save(sess,'d:/model/PAN.ckpt')
+       
+       
+if __name__=='__main__':    
+    input_shape=[100,28,28,3]
+    inputs=np.random.random(size=input_shape)
+    outputs=np.random.normal(size=input_shape)
+    train(inputs,outputs,input_shape,epoch=2)
+'''saver=tf.train.import_meta_graph('d:/model/PAN.ckpt.meta')
+sess=tf.Session()
+saver.restore(sess,'d:/model/PAN.ckpt')
+sess.run(output_data)'''
+        
+    
+
