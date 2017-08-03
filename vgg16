@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ########################################################################################
 # Davi Frossard, 2016                                                                  #
 # VGG16 implementation in TensorFlow                                                   #
@@ -10,18 +11,22 @@
 
 import tensorflow as tf
 import numpy as np
+import os
+import xml.etree.ElementTree as ET
 from scipy.misc import imread, imresize
-from imagenet_classes import class_names
+#from imagenet_classes import class_names
 batchsize=20
 epoch=7000
 
 class vgg16:
-    def __init__(self, imgs,labels, weights=None):
+    def __init__(self, imgs,labels, weights=None,sess=None):
         self.imgs = tf.placeholder(tf.float32,[None,224,224,3])
         self.convlayers()#卷积层
         self.fc_layers()#全连接层
         self.target=tf.placeholder(tf.float32,[None,4])
         self.probs = self.fc3l
+        self.x=imgs
+        self.y=labels
         if weights is not None and sess is not None:
             self.load_weights(weights, sess)
 
@@ -259,9 +264,9 @@ class vgg16:
 
     def train(self):
         variable_to_store=tf.global_variables()
-        saver=tf.train.Saver()
+        saver=tf.train.Saver(variable_to_store)
         with tf.name_scope('loss'):
-            loss=tf.reduce_mean(tf.reduce_sum(tf.square(self.target-srlf.probs)))
+            loss=tf.reduce_mean(tf.reduce_sum(tf.square(self.target-self.probs)))
             tf.summary.scalar('loss',loss)
         merged=tf.summary.merge_all()
         sess=tf.Session(tf.global_variables_initializer())
@@ -270,16 +275,36 @@ class vgg16:
         trainstep=optimizer.minimize(loss)
         for i in range(epoch):
             for j in range(10):
-                x=imgs[j*20:(j+1)*20]
-                y=labels[j*20:(j+1)*20]
+                x=self.x[j*20:(j+1)*20]
+                y=self.y[j*20:(j+1)*20]
                 sess.run(trainstep,feed_dict={self.imgs:x,self.targets:y})
                 if j==9:
                     rs=sess.run(merged,feed_dict={self.imgs:x,self.targets:y})
                     writer.add_summary(rs,i*epoch+200)
             if i%1000==0:
-                saver.save(sess,'/output/save.ckpt',global_step=i)   
-
-        
+                saver.save(sess,'/output/save.ckpt',global_step=i)
+def read_image(imgdir): #read image
+    imgname=os.listdir(imgdir)
+    imgs=[]
+    for filename in imgname:
+        filepath=os.path.join(imgdir,filename)
+        imgs.append(imresize(imread(filepath),(224,224)))
+    imgs=np.array(imgs,dtype='float32')
+    return imgs
+def read_labels(labeldir):
+    labelnames=os.listdir(labeldir)
+    labels=[]
+    for filename in labelnames:
+        filepath=os.path.join(imgdir,filename)
+        tree=ET.parse(filepath)
+        obj=tree.find('object')
+        bbox=obj.find('bndbox')
+        labels.append([bbox.find('xmin').text,bbox.find('ymin').text,bbox.find('xmax').text,bbox.find('ymax').text])
+    return np.array(labels,dtype='float32')
+         
+if __name__=='__main__':
+    imgdir='e:\\dataset'
+    data=read_image(imgdir) 
 
 '''if __name__ == '__main__':
     sess = tf.Session()
