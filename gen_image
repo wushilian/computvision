@@ -1,0 +1,45 @@
+import numpy as np
+from PIL import Image
+import os
+from PIL import ImageFilter
+
+width=50
+height=90
+
+def get_random(n):  #n is the number of the random list
+    randomlist=[]
+    for i in range(n):
+        randomlist.append(np.random.randint(0,7))
+    return np.array(randomlist)
+
+def get_random_file(dirname):# random select a file from dir
+    filenames=os.listdir(dirname)
+    index=np.random.randint(0,len(filenames))
+    return filenames[index]
+
+def get_filename_labels(n):
+    randomlist=get_random(n)
+    filenames=[]
+    labels=''
+    for i in range(n):
+        dirs=str(randomlist[i])
+        labels+=dirs
+        files=get_random_file(dirs)
+        path=os.path.join(dirs,files)
+        filenames.append(path)
+    return filenames,labels
+    
+def gen_image(n,index):
+    filenames,labels=get_filename_labels(n)
+    img=Image.new('RGB',(n*50,90))
+    for i in range(n):
+        temp=Image.open(filenames[i])
+        temp=temp.resize((width,height))
+        img.paste(temp,(i*width,0))
+    file=str(index)+'_'+labels+'.jpg'
+    img.filter(ImageFilter.SMOOTH)
+    img.save(file)
+
+for i in range(10):
+    n=np.random.randint(8,10)
+    gen_image(n,i)
