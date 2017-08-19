@@ -1,0 +1,43 @@
+import tensorflow as tf
+from keras import backend as K
+from keras.layers import Dense,Flatten
+from keras.layers.convolutional import Conv2D
+from keras.layers.pooling import MaxPooling2D
+from tensorflow.examples.tutorials.mnist import input_data
+import numpy as np
+       
+sess=tf.Session()
+K.set_session(sess)
+mnist=input_data.read_data_sets('MNIST_data',one_hot=True)
+
+hight=28
+width=28
+channel=1
+
+img=tf.placeholder(tf.float32,shape=(None,width,hight,channel))
+labels=tf.placeholder(tf.float32,shape=(None,10))
+
+conv1=Conv2D(16,[3,3],activation='relu')(img)
+maxpool1=MaxPooling2D(pool_size=3, strides=2)(conv1)
+conv2=Conv2D(32,[3,3],activation='relu')(maxpool1)
+conv3=Conv2D(64,[3,3],activation='relu')(conv2)
+conv4=Conv2D(32,[3,3],activation='relu')(conv3)
+flat=tf.reshape(conv4,[-1,6*6*32])
+preds=Dense(10,activation='softmax')(flat)
+
+cross_entropy=tf.reduce_mean(-tf.reduce_sum(labels*tf.log(preds)))
+train_step=tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
+
+
+x=mnist.train.images[:6000]
+x=np.reshape(x,[-1,28,28,1])
+y=mnist.train.labels[:6000]
+sess.run(tf.global_variables_initializer())
+saver=tf.train.Saver()
+for i in range(1000):
+    sess.run(train_step,feed_dict={img:x,labels:y})
+    if i%10==0:
+        print(sess.run(cross_entropy,feed_dict={img:x,labels:y}))
+        saver.save(sess,'./output/save.ckpt',global_step=i)
+
+
