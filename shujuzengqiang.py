@@ -25,7 +25,7 @@ def eachFile(filepath):
         x = img_to_array(img)
         x = x.reshape((1,)+x.shape)
         i = 0
-            for batch in datagen.flow(
+        for batch in datagen.flow(
                         x,
                         batch_size =1,
                         save_to_dir = write_path,
